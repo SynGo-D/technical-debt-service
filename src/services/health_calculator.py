@@ -1,40 +1,46 @@
 class HealthCalculator:
 
-    FINDING_WEIGHT = 1.5
-    CRITICAL_WEIGHT = 8
-    HIGH_WEIGHT = 4
-    SECURITY_WEIGHT = 10
-    DEBT_HOUR_WEIGHT = 2
-
     def calculate(
         self,
         total_findings: int,
         critical: int,
         high: int,
-        security: int,
         debt_hours: float,
+        lines_changed: int
     ) -> int:
 
-        penalty = (
-            total_findings * self.FINDING_WEIGHT
-            + critical * self.CRITICAL_WEIGHT
-            + high * self.HIGH_WEIGHT
-            + security * self.SECURITY_WEIGHT
-            + debt_hours * self.DEBT_HOUR_WEIGHT
+        score = 100
+
+        score -= critical * 15
+        score -= high * 8
+        score -= total_findings * 2
+
+        if lines_changed > 0:
+
+            debt_ratio = (
+                debt_hours * 60
+            ) / lines_changed
+
+            if debt_ratio > 0.50:
+                score -= 10
+
+            elif debt_ratio > 0.25:
+                score -= 5
+
+        return max(
+            0,
+            min(100, score)
         )
+    
+    def health_status(score: int) -> str:
 
-        score = 100 - penalty
+        if score >= 90:
+            return "HEALTHY"
 
-        return max(0, min(100, round(score)))
+        if score >= 70:
+            return "GOOD"
 
+        if score >= 50:
+            return "NEEDS_ATTENTION"
 
-def health_status(score: int) -> str:
-
-    if score >= 80:
-        return "HEALTHY"
-    elif score >= 60:
-        return "NEEDS_ATTENTION"
-    elif score >= 40:
-        return "AT_RISK"
-    else:
         return "CRITICAL"

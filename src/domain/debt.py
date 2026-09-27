@@ -3,28 +3,18 @@ from pydantic import BaseModel
 from .finding import AnalysisFinding
 
 
-from pydantic import BaseModel
+class DebtCalculationRequest(BaseModel):
 
-
-class TechnicalDebtResult(BaseModel):
     repository: str
+
     pull_request_number: int
+
     commit_sha: str
 
-    total_findings: int
-    total_debt_minutes: int
-    total_debt_hours: float
-    estimated_cost: float
-    debt_ratio: float | None
+    findings: list[AnalysisFinding]
 
-    health_score: int
-    health_status: str
+    lines_added: int = 0
 
-    critical_issues: int
-    high_risk_issues: int
-    medium_risk_issues: int
-    security_issues: int
-    bugs: int
-    maintainability_issues: int
+    lines_removed: int = 0
 
-    issues: list[dict]
+    files_changed: int = 0

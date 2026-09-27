@@ -1,12 +1,15 @@
+import json
+
 from ..domain.finding import AnalysisFinding
 from ..domain.agent_outputs import (
-    DebtClassification,
-    EffortEstimation,
+    ClassificationOutput,
+    EstimationOutput
 )
-from ..infrastructure.llm_client import LLMClient
+
+from .llm_client import LLMClient
 
 
-class DebtEstimationAgent:
+class EstimationAgent:
 
     def __init__(self, llm: LLMClient):
         self.llm = llm
@@ -14,79 +17,55 @@ class DebtEstimationAgent:
     async def estimate(
         self,
         finding: AnalysisFinding,
-        classification: DebtClassification,
-    ) -> EffortEstimation:
+        classification: ClassificationOutput
+    ) -> EstimationOutput:
 
-        prompt = f"""
-You are a software maintenance effort estimation specialist.
+        system_prompt = """
+You are a software remediation-effort estimation agent.
 
-Estimate the effort required to fix the following issue.
+Estimate the developer effort required to fix the supplied issue.
 
-Finding:
-{finding.message}
+Return ONLY valid JSON.
 
-Tool:
-{finding.tool}
+Required fields:
 
-Rule:
-{finding.rule_id}
+{
+  "estimated_minutes": 0,
+  "confidence": 0.0,
+  "recommendation": "...",
+  "reasoning": "..."
+}
 
-File:
-{finding.file_path}
+Use realistic development effort.
 
-Severity:
-{finding.severity}
-
-Category:
-{finding.category}
-
-Debt type:
-{classification.debt_type}
-
-Impact:
-{classification.impact}
-
-Risk:
-{classification.risk}
-
-Complexity:
-{classification.complexity}
-
-Estimate the remediation time in minutes.
-
-Consider:
-
-- scope of the issue
-- likely code changes
-- testing effort
-- potential regression risk
-- issue complexity
-
-Return JSON only with:
-
-estimated_minutes
-confidence
-recommendation
-reasoning
+Do not estimate extremely large values for a single static-analysis issue
+unless the finding clearly requires architectural changes.
 """
 
-        return await self.llm.generate_structured(
-            prompt,
-            EffortEstimation,
+        user_prompt = f"""
+Finding:
+
+Tool: {finding.tool}
+Rule: {finding.rule_id}
+Severity: {finding.severity}
+Category: {finding.category}
+File: {finding.file_path}
+Line: {finding.line}
+Message: {finding.message}
+
+Classification:
+
+Debt type: {classification.debt_type}
+Impact: {classification.impact}
+Risk: {classification.risk}
+Complexity: {classification.complexity}
+"""
+
+        response = await self.llm.generate(
+            system_prompt,
+            user_prompt
         )
 
-def validate_effort(
-    minutes: int,
-    finding
-) -> int:
+        data = json.loads(response)
 
-    if finding.category == "style":
-        return min(minutes, 30)
-
-    if finding.category == "unused_code":
-        return min(minutes, 30)
-
-    if finding.category == "vulnerability":
-        return min(minutes, 480)
-
-    return min(minutes, 240)
+        return EstimationOutput(**data)

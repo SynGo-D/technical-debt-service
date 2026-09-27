@@ -1,57 +1,89 @@
+import json
+
 from ..domain.finding import AnalysisFinding
-from ..domain.agent_outputs import DebtClassification
-from ..infrastructure.llm_client import LLMClient
+from ..domain.agent_outputs import ClassificationOutput
+from .llm_client import LLMClient
 
 
-class DebtClassificationAgent:
+class ClassificationAgent:
 
     def __init__(self, llm: LLMClient):
         self.llm = llm
 
     async def classify(
         self,
-        finding: AnalysisFinding,
-    ) -> DebtClassification:
+        finding: AnalysisFinding
+    ) -> ClassificationOutput:
 
-        prompt = f"""
-You are a software technical-debt classification specialist.
+        system_prompt = """
+You are a software technical-debt classification agent.
 
-Analyze the following static-analysis finding.
+Classify the supplied static-analysis finding.
 
-Tool:
-{finding.tool}
+Return ONLY valid JSON.
 
-Rule:
-{finding.rule_id}
+Required fields:
 
-File:
-{finding.file_path}
+{
+  "debt_type": "...",
+  "impact": "...",
+  "risk": "...",
+  "complexity": "...",
+  "confidence": 0.0,
+  "reason": "..."
+}
 
-Line:
-{finding.line}
+Allowed debt_type values:
 
-Severity:
-{finding.severity}
+SECURITY
+BUG
+MAINTAINABILITY
+PERFORMANCE
+RELIABILITY
+DUPLICATION
+TESTABILITY
+ARCHITECTURE
+DOCUMENTATION
 
-Category:
-{finding.category}
+Allowed impact values:
 
-Message:
-{finding.message}
+LOW
+MEDIUM
+HIGH
+CRITICAL
 
-Determine:
+Allowed risk values:
 
-1. debt_type
-2. business/technical impact
-3. risk
-4. implementation complexity
-5. confidence
-6. short explanation
+LOW
+MEDIUM
+HIGH
+CRITICAL
 
-Return JSON only.
+Allowed complexity values:
+
+LOW
+MEDIUM
+HIGH
 """
 
-        return await self.llm.generate_structured(
-            prompt,
-            DebtClassification,
+        user_prompt = f"""
+Finding:
+
+Tool: {finding.tool}
+Rule: {finding.rule_id}
+Severity: {finding.severity}
+Category: {finding.category}
+File: {finding.file_path}
+Line: {finding.line}
+Message: {finding.message}
+Language: {finding.metadata.get("language")}
+"""
+
+        response = await self.llm.generate(
+            system_prompt,
+            user_prompt
         )
+
+        data = json.loads(response)
+
+        return ClassificationOutput(**data)
