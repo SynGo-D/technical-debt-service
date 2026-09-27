@@ -1,86 +1,34 @@
-from ..domain.agent_outputs import (
-    DebtClassification,
-    EffortEstimation,
-)
-from ..domain.finding import AnalysisFinding
-
-
 class DebtAggregator:
 
     def aggregate(
         self,
-        findings,
-        classifications,
-        estimations,
-    ):
+        results: list[dict]
+    ) -> dict:
 
-        total_minutes = 0
+        total_minutes = sum(
+            item["estimated_minutes"]
+            for item in results
+        )
 
-        critical = 0
-        high = 0
-        medium = 0
-        low = 0
+        critical = sum(
+            1
+            for item in results
+            if item["risk"] == "CRITICAL"
+        )
 
-        security = 0
-        bugs = 0
-        maintainability = 0
-
-        issues = []
-
-        for finding, classification, estimation in zip(
-            findings,
-            classifications,
-            estimations,
-        ):
-
-            minutes = max(
-                1,
-                estimation.estimated_minutes,
-            )
-
-            total_minutes += minutes
-
-            if classification.risk == "CRITICAL":
-                critical += 1
-            elif classification.risk == "HIGH":
-                high += 1
-            elif classification.risk == "MEDIUM":
-                medium += 1
-            else:
-                low += 1
-
-            if classification.debt_type == "SECURITY":
-                security += 1
-
-            if classification.debt_type == "BUG":
-                bugs += 1
-
-            if classification.debt_type == "MAINTAINABILITY":
-                maintainability += 1
-
-            issues.append({
-                "finding_id": finding.finding_id,
-                "minutes": minutes,
-                "debt_type": classification.debt_type,
-                "impact": classification.impact,
-                "risk": classification.risk,
-                "confidence": (
-                    classification.confidence
-                    * estimation.confidence
-                ),
-                "recommendation": (
-                    estimation.recommendation
-                ),
-            })
+        high = sum(
+            1
+            for item in results
+            if item["risk"] == "HIGH"
+        )
 
         return {
+            "total_findings": len(results),
             "total_debt_minutes": total_minutes,
+            "total_debt_hours": round(
+                total_minutes / 60,
+                2
+            ),
             "critical_issues": critical,
-            "high_risk_issues": high,
-            "medium_risk_issues": medium,
-            "low_risk_issues": low,
-            "security_issues": security,
-            "bugs": bugs,
-            "maintainability_issues": maintainability,
-            "issues": issues,
+            "high_risk_issues": high
         }

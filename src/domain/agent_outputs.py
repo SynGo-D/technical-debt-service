@@ -1,57 +1,31 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
-class DebtClassification(BaseModel):
-    debt_type: Literal[
-        "BUG",
-        "SECURITY",
-        "MAINTAINABILITY",
-        "PERFORMANCE",
-        "DUPLICATION",
-        "COMPLEXITY",
-        "CODE_STYLE",
-        "OTHER",
-    ]
+class ClassificationOutput(BaseModel):
 
-    impact: Literal[
-        "LOW",
-        "MEDIUM",
-        "HIGH",
-        "CRITICAL",
-    ]
+    debt_type: str
 
-    risk: Literal[
-        "LOW",
-        "MEDIUM",
-        "HIGH",
-        "CRITICAL",
-    ]
+    impact: str
 
-    complexity: Literal[
-        "LOW",
-        "MEDIUM",
-        "HIGH",
-    ]
+    risk: str
+
+    complexity: str
 
     confidence: float = Field(
-        ge=0,
-        le=1,
+        ge=0.0,
+        le=1.0
     )
 
     reason: str
 
 
-class EffortEstimation(BaseModel):
-    estimated_minutes: int = Field(
-        ge=1,
-        le=10000,
-    )
+class EstimationOutput(BaseModel):
+
+    estimated_minutes: int
 
     confidence: float = Field(
-        ge=0,
-        le=1,
+        ge=0.0,
+        le=1.0
     )
 
     recommendation: str
