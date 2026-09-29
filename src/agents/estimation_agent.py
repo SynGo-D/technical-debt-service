@@ -1,10 +1,11 @@
 import json
 
-from ..domain.finding import AnalysisFinding
 from ..domain.agent_outputs import (
     ClassificationOutput,
     EstimationOutput
 )
+
+from ..domain.finding import AnalysisFinding
 
 from .llm_client import LLMClient
 
@@ -12,6 +13,7 @@ from .llm_client import LLMClient
 class EstimationAgent:
 
     def __init__(self, llm: LLMClient):
+
         self.llm = llm
 
     async def estimate(
@@ -21,13 +23,14 @@ class EstimationAgent:
     ) -> EstimationOutput:
 
         system_prompt = """
-You are a software remediation-effort estimation agent.
+You are a software remediation effort estimation agent.
 
-Estimate the developer effort required to fix the supplied issue.
+Estimate the amount of developer time required to fix
+the supplied technical debt issue.
 
 Return ONLY valid JSON.
 
-Required fields:
+Format:
 
 {
   "estimated_minutes": 0,
@@ -36,29 +39,46 @@ Required fields:
   "reasoning": "..."
 }
 
-Use realistic development effort.
+Use realistic estimates.
 
-Do not estimate extremely large values for a single static-analysis issue
-unless the finding clearly requires architectural changes.
+Do not use extremely large estimates for simple
+static-analysis issues.
 """
 
         user_prompt = f"""
 Finding:
 
 Tool: {finding.tool}
+
 Rule: {finding.rule_id}
+
 Severity: {finding.severity}
+
 Category: {finding.category}
-File: {finding.file_path}
-Line: {finding.line}
-Message: {finding.message}
+
+File:
+{finding.file_path}
+
+Line:
+{finding.line}
+
+Message:
+{finding.message}
+
 
 Classification:
 
-Debt type: {classification.debt_type}
-Impact: {classification.impact}
-Risk: {classification.risk}
-Complexity: {classification.complexity}
+Debt type:
+{classification.debt_type}
+
+Impact:
+{classification.impact}
+
+Risk:
+{classification.risk}
+
+Complexity:
+{classification.complexity}
 """
 
         response = await self.llm.generate(
@@ -68,4 +88,6 @@ Complexity: {classification.complexity}
 
         data = json.loads(response)
 
-        return EstimationOutput(**data)
+        return EstimationOutput(
+            **data
+        )

@@ -16,7 +16,10 @@ class RiskCalculator:
             return "LOW"
 
         highest = max(
-            self.WEIGHTS.get(risk.upper(), 1)
+            self.WEIGHTS.get(
+                risk.upper(),
+                1
+            )
             for risk in risks
         )
 

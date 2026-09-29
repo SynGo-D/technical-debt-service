@@ -1,13 +1,14 @@
 import json
 
-from ..domain.finding import AnalysisFinding
 from ..domain.agent_outputs import ClassificationOutput
+from ..domain.finding import AnalysisFinding
 from .llm_client import LLMClient
 
 
 class ClassificationAgent:
 
     def __init__(self, llm: LLMClient):
+
         self.llm = llm
 
     async def classify(
@@ -16,13 +17,14 @@ class ClassificationAgent:
     ) -> ClassificationOutput:
 
         system_prompt = """
-You are a software technical-debt classification agent.
+You are a technical debt classification agent.
 
-Classify the supplied static-analysis finding.
+Analyze a static-analysis finding and classify its
+technical debt characteristics.
 
 Return ONLY valid JSON.
 
-Required fields:
+The JSON must contain:
 
 {
   "debt_type": "...",
@@ -33,7 +35,7 @@ Required fields:
   "reason": "..."
 }
 
-Allowed debt_type values:
+Allowed debt types:
 
 SECURITY
 BUG
@@ -45,38 +47,32 @@ TESTABILITY
 ARCHITECTURE
 DOCUMENTATION
 
-Allowed impact values:
+Allowed levels:
 
 LOW
 MEDIUM
 HIGH
 CRITICAL
-
-Allowed risk values:
-
-LOW
-MEDIUM
-HIGH
-CRITICAL
-
-Allowed complexity values:
-
-LOW
-MEDIUM
-HIGH
 """
 
         user_prompt = f"""
-Finding:
-
 Tool: {finding.tool}
+
 Rule: {finding.rule_id}
+
 Severity: {finding.severity}
+
 Category: {finding.category}
+
 File: {finding.file_path}
+
 Line: {finding.line}
-Message: {finding.message}
-Language: {finding.metadata.get("language")}
+
+Message:
+{finding.message}
+
+Language:
+{finding.metadata.get("language", "unknown")}
 """
 
         response = await self.llm.generate(
@@ -86,4 +82,6 @@ Language: {finding.metadata.get("language")}
 
         data = json.loads(response)
 
-        return ClassificationOutput(**data)
+        return ClassificationOutput(
+            **data
+        )

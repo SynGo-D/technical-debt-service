@@ -1,9 +1,10 @@
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
 class AnalysisFinding(BaseModel):
 
-    finding_id: str
+    finding_id: UUID
 
     repository: str
 
@@ -29,6 +30,6 @@ class AnalysisFinding(BaseModel):
 
     fingerprint: str
 
-    remediation_minutes: int | None = None
-
     metadata: dict = Field(default_factory=dict)
+
+    

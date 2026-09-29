@@ -1,6 +1,7 @@
 class CostCalculator:
 
     def __init__(self, hourly_rate: float):
+
         self.hourly_rate = hourly_rate
 
     def calculate(
