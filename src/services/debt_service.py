@@ -1,313 +1,121 @@
-from uuid import UUID
+import asyncio
+import logging
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ..agents.classification_agent import ClassificationAgent
-from ..agents.estimation_agent import EstimationAgent
-from ..agents.llm_client import LLMClient
+from ..domain.debt import DebtCalculationRequest
 from ..domain.finding import AnalysisFinding
 
-from .aggregator import DebtAggregator
-from .cost_calculator import CostCalculator
-from .health_calculator import HealthCalculator
-from .debt_repository import DebtRepository
+logger = logging.getLogger(__name__)
+
+_SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
+
+_RISK_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+
+_MAX_RATIO = 9999.9999  # debt_reviews.debt_ratio is NUMERIC(8,4)
 
 
 class DebtService:
+    """Runs both agents over a PR's findings and computes the summary.
+    Pure calculation - persisting is DebtRepository's job."""
 
     def __init__(
         self,
-        session: AsyncSession,
+        classification_agent,
+        estimation_agent,
+        aggregator,
+        cost_calculator,
+        health_calculator,
+        concurrency: int = 5,
+        max_findings: int = 200,
     ):
 
-        self.session = session
+        self.classification_agent = classification_agent
+        self.estimation_agent = estimation_agent
+        self.aggregator = aggregator
+        self.cost_calculator = cost_calculator
+        self.health_calculator = health_calculator
+        self.concurrency = concurrency
+        self.max_findings = max_findings
 
-        self.repository = DebtRepository(session)
-
-        self.llm = LLMClient()
-
-        self.classification_agent = ClassificationAgent(
-            self.llm
-        )
-
-        self.estimation_agent = EstimationAgent(
-            self.llm
-        )
-
-        self.aggregator = DebtAggregator()
-
-        self.cost_calculator = CostCalculator(
-            hourly_rate=25.0
-        )
-
-        self.health_calculator = HealthCalculator()
-
-    async def calculate_debt(
+    async def _assess(
         self,
-        request,
-    ):
-
-        issues = []
-
-        # ====================================================
-        # PROCESS EVERY FINDING
-        # ====================================================
-
-        for finding in request.findings:
-
-            # ----------------------------------------------
-            # Convert request finding -> domain finding
-            # ----------------------------------------------
-
-            analysis_finding = AnalysisFinding(
-                finding_id=UUID(
-                    str(finding.finding_id)
-                ),
-
-                repository=request.repository,
-
-                pull_request_number=
-                    request.pull_request_number,
-
-                commit_sha=request.commit_sha,
-
-                file_path=finding.file_path,
-
-                line=finding.line,
-
-                column=finding.column,
-
-                severity=finding.severity,
-
-                category=finding.category,
-
-                rule_id=finding.rule_id,
-
-                message=finding.message,
-
-                tool=finding.tool,
-
-                fingerprint=finding.fingerprint,
-
-                metadata=finding.metadata,
-            )
-
-            # ----------------------------------------------
-            # AGENT 1
-            # ----------------------------------------------
-
-            classification = (
-                await self.classification_agent.classify(
-                    analysis_finding
-                )
-            )
-
-            # ----------------------------------------------
-            # AGENT 2
-            # ----------------------------------------------
-
-            estimation = (
-                await self.estimation_agent.estimate(
-                    analysis_finding,
-                    classification
-                )
-            )
-
-            # ----------------------------------------------
-            # Build issue
-            # ----------------------------------------------
-
-            issue = {
-
-                "finding_id":
-                    analysis_finding.finding_id,
-
-                "file_path":
-                    analysis_finding.file_path,
-
-                "line":
-                    analysis_finding.line,
-
-                "tool":
-                    analysis_finding.tool,
-
-                "rule_id":
-                    analysis_finding.rule_id,
-
-                "debt_type":
-                    classification.debt_type,
-
-                "impact":
-                    classification.impact,
-
-                "risk":
-                    classification.risk,
-
-                "estimated_minutes":
-                    estimation.estimated_minutes,
-
-                "confidence":
-                    round(
-                        (
-                            classification.confidence
-                            +
-                            estimation.confidence
-                        ) / 2,
-                        2
-                    ),
-
-                "recommendation":
-                    estimation.recommendation,
-
-                "complexity":
-                    classification.complexity,
-
-                "reasoning":
-                    estimation.reasoning,
-            }
-
-            issues.append(issue)
-
-        # ====================================================
-        # AGGREGATE ALL FINDINGS
-        # ====================================================
-
-        summary = self.aggregator.aggregate(
-            issues
-        )
-
-        # ====================================================
-        # COST
-        # ====================================================
-
-        estimated_cost = (
-            self.cost_calculator.calculate(
-                summary["total_debt_minutes"]
-            )
-        )
-
-        # ====================================================
-        # HEALTH
-        # ====================================================
-
-        health_score = (
-            self.health_calculator.calculate(
-
-                total_findings=
-                    summary["total_findings"],
-
-                critical=
-                    summary["critical_issues"],
-
-                high=
-                    summary["high_risk_issues"],
-
-                debt_hours=
-                    summary["total_debt_hours"],
-
-                lines_changed=
-                    request.lines_changed,
-            )
-        )
-
-        health_status = (
-            self.health_calculator.status(
-                health_score
-            )
-        )
-
-        # ====================================================
-        # DEBT RATIO
-        # ====================================================
-
-        debt_ratio = 0.0
-
-        if request.lines_changed > 0:
-
-            debt_ratio = round(
-                summary["total_debt_minutes"]
-                / request.lines_changed,
-                4
-            )
-
-        # ====================================================
-        # FINAL SUMMARY
-        # ====================================================
-
-        summary.update({
-
-            "estimated_cost":
-                estimated_cost,
-
-            "debt_ratio":
-                debt_ratio,
-
-            "health_score":
-                health_score,
-
-            "health_status":
-                health_status,
-        })
-
-        # ====================================================
-        # CREATE ONE REVIEW
-        # ====================================================
-
-        review_data = {
-
-            **summary,
-
-            "repository":
-                request.repository,
-
-            "pull_request_number":
-                request.pull_request_number,
-
-            "commit_sha":
-                request.commit_sha,
-        }
-
-        review = await (
-            self.repository.create_review(
-                review_data
-            )
-        )
-
-        # ====================================================
-        # CREATE MANY ISSUES
-        # ====================================================
-
-        for issue in issues:
-
-            await self.repository.create_issue(
-                review.id,
-                issue
-            )
-
-        # ====================================================
-        # COMMIT
-        # ====================================================
-
-        await self.session.commit()
-
-        # ====================================================
-        # RETURN
-        # ====================================================
+        finding: AnalysisFinding,
+        gate: asyncio.Semaphore
+    ) -> dict:
+
+        # Agent 1 then Agent 2 (which needs Agent 1's output) per finding;
+        # different findings run concurrently, bounded by `gate`.
+        async with gate:
+            classification = await self.classification_agent.classify(finding)
+            estimation = await self.estimation_agent.estimate(finding, classification)
 
         return {
+            "finding_id": finding.finding_id,
+            "file_path": finding.file_path,
+            "line": finding.line,
+            "tool": finding.tool,
+            "rule_id": finding.rule_id,
+            "debt_type": classification.debt_type,
+            "impact": classification.impact,
+            "risk": classification.risk,
+            "complexity": classification.complexity,
+            "estimated_minutes": estimation.estimated_minutes,
+            "confidence": estimation.confidence,
+            "recommendation": estimation.recommendation,
+        }
 
-            "repository":
-                request.repository,
+    async def calculate(self, request: DebtCalculationRequest) -> dict:
 
-            "pull_request_number":
-                request.pull_request_number,
+        received = len(request.findings)
 
-            "commit_sha":
-                request.commit_sha,
+        findings = sorted(
+            request.findings,
+            key=lambda f: _SEVERITY_ORDER.get(f.severity, 3),
+        )[: self.max_findings]
 
-            "summary":
-                summary,
+        gate = asyncio.Semaphore(self.concurrency)
 
-            "issues":
-                issues,
+        results = list(
+            await asyncio.gather(*(self._assess(f, gate) for f in findings))
+        )
+
+        results.sort(
+            key=lambda r: (_RISK_ORDER.get(r["risk"], 4), -r["estimated_minutes"])
+        )
+
+        summary = self.aggregator.aggregate(results)
+
+        cost = self.cost_calculator.calculate(summary["total_debt_minutes"])
+
+        lines_changed = request.lines_added + request.lines_removed
+
+        health_score = self.health_calculator.calculate(
+            total_findings=summary["total_findings"],
+            critical=summary["critical_issues"],
+            high=summary["high_risk_issues"],
+            debt_hours=summary["total_debt_hours"],
+            lines_changed=lines_changed,
+        )
+
+        # Debt minutes per changed line; unknown (None) when the PR diff
+        # was unavailable rather than a misleading 0.
+        debt_ratio = (
+            round(min(summary["total_debt_minutes"] / lines_changed, _MAX_RATIO), 4)
+            if lines_changed > 0
+            else None
+        )
+
+        return {
+            "repository": request.repository,
+            "pull_request_number": request.pull_request_number,
+            "commit_sha": request.commit_sha,
+            "summary": {
+                **summary,
+                "estimated_cost": cost,
+                "debt_ratio": debt_ratio,
+                "health_score": health_score,
+                "health_status": self.health_calculator.status(health_score),
+            },
+            "findings_received": received,
+            "findings_skipped": received - len(findings),
+            "issues": results,
         }

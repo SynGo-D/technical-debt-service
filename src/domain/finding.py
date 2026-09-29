@@ -30,6 +30,7 @@ class AnalysisFinding(BaseModel):
 
     fingerprint: str
 
-    metadata: dict = Field(default_factory=dict)
+    # analysis-engine's SQALE-style estimate; used when the LLM is unavailable.
+    remediation_minutes: int | None = None
 
-    
+    metadata: dict = Field(default_factory=dict)

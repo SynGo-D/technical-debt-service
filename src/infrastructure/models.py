@@ -9,6 +9,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -116,7 +117,7 @@ class DebtReview(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default="now()",
+        server_default=func.now(),
     )
 
     issues: Mapped[list["DebtIssue"]] = relationship(
@@ -202,9 +203,15 @@ class DebtIssue(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default="now()",
+        server_default=func.now(),
     )
 
     review: Mapped["DebtReview"] = relationship(
         back_populates="issues",
     )
+
+
+async def create_tables(engine) -> None:
+    """Idempotent (CREATE TABLE IF NOT EXISTS) - safe to call on every start."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)

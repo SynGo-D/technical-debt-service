@@ -1,104 +1,140 @@
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 
-from ..infrastructure.database import get_db
-from ..domain.finding import AnalysisFinding
-from ..services.debt_service import DebtService
+from fastapi import APIRouter, HTTPException, Query, Request
+from sqlalchemy.exc import SQLAlchemyError
+
+from ..domain.debt import DebtCalculationRequest
+from ..infrastructure.analysis_repository import AnalysisNotFound
+
+logger = logging.getLogger(__name__)
 
 
+# Same route shape as analysis-engine (/api/repositories/{owner}/{repo}/...)
+# so a gateway can proxy both services the same way.
 router = APIRouter(
-    prefix="/api/debt",
     tags=["Technical Debt"]
 )
 
 
-class DebtRequest(BaseModel):
+async def _calculate_and_store(
+    request: Request,
+    payload: DebtCalculationRequest
+) -> dict:
 
-    finding_id: str
+    state = request.app.state
 
-    repository: str
+    result = await state.debt_service.calculate(payload)
 
-    pull_request_number: int
+    saved = await state.debt_repository.save(result)
 
-    commit_sha: str
-
-    file_path: str
-
-    line: int
-
-    column: int | None = None
-
-    severity: str
-
-    category: str
-
-    rule_id: str
-
-    message: str
-
-    tool: str
-
-    fingerprint: str
-
-    metadata: dict = Field(
-        default_factory=dict
-    )
-
-    lines_changed: int = Field(
-        default=0,
-        ge=0
-    )
+    return {
+        "review": saved,
+        "findings_received": result["findings_received"],
+        "findings_skipped": result["findings_skipped"],
+    }
 
 
-@router.post("/calculate")
-async def calculate_debt(
-    request: DebtRequest,
-    db: AsyncSession = Depends(get_db)
+@router.post("/api/debt/calculate")
+async def calculate_from_findings(
+    payload: DebtCalculationRequest,
+    request: Request
+):
+    """Calculate + store debt for findings supplied in the body."""
+
+    return await _calculate_and_store(request, payload)
+
+
+@router.post(
+    "/api/repositories/{owner}/{repo}/debt/pull-requests/{pull_request_number}/calculate"
+)
+async def calculate_for_pull_request(
+    owner: str,
+    repo: str,
+    pull_request_number: int,
+    request: Request
+):
+    """Read the PR's latest completed analysis from the analysis-engine
+    database, run both agents, store and return the result. Slow (LLM calls)."""
+
+    repository = f"{owner}/{repo}"
+
+    try:
+        payload = await request.app.state.analysis_repository.get_calculation_request(
+            repository,
+            pull_request_number,
+        )
+
+    except AnalysisNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+
+    except (SQLAlchemyError, OSError) as e:
+        logger.exception("analysis-engine database unreachable")
+        raise HTTPException(
+            status_code=502,
+            detail=f"analysis-engine database unavailable: {type(e).__name__}",
+        ) from None
+
+    return await _calculate_and_store(request, payload)
+
+
+@router.get("/api/debt/repositories")
+async def list_repositories(request: Request):
+
+    return {
+        "repositories": await request.app.state.debt_repository.list_repositories()
+    }
+
+
+@router.get("/api/repositories/{owner}/{repo}/debt")
+async def list_reviews(
+    owner: str,
+    repo: str,
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
 ):
 
-    # Convert API request into domain object
+    repository = f"{owner}/{repo}"
 
-    finding = AnalysisFinding(
-        finding_id=request.finding_id,
+    reviews = await request.app.state.debt_repository.list_reviews(repository, limit)
 
-        repository=request.repository,
+    return {"repository": repository, "reviews": reviews}
 
-        pull_request_number=
-            request.pull_request_number,
 
-        commit_sha=request.commit_sha,
+@router.get("/api/repositories/{owner}/{repo}/debt/summary")
+async def repository_summary(owner: str, repo: str, request: Request):
 
-        file_path=request.file_path,
-
-        line=request.line,
-
-        column=request.column,
-
-        severity=request.severity,
-
-        category=request.category,
-
-        rule_id=request.rule_id,
-
-        message=request.message,
-
-        tool=request.tool,
-
-        fingerprint=request.fingerprint,
-
-        metadata=request.metadata,
+    summary = await request.app.state.debt_repository.repository_summary(
+        f"{owner}/{repo}"
     )
 
-    # Create debt service
+    if summary is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No technical-debt reviews for this repository yet.",
+        )
 
-    service = DebtService(db)
+    return summary
 
-    # Run the complete pipeline
 
-    result = await service.calculate_debt(
-        finding=finding,
-        lines_changed=request.lines_changed
+@router.get(
+    "/api/repositories/{owner}/{repo}/debt/pull-requests/{pull_request_number}"
+)
+async def get_pull_request_debt(
+    owner: str,
+    repo: str,
+    pull_request_number: int,
+    request: Request
+):
+
+    review = await request.app.state.debt_repository.get_latest_for_pull_request(
+        f"{owner}/{repo}",
+        pull_request_number,
     )
 
-    return result
+    if review is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No technical-debt review for this pull request yet.",
+        )
+
+    return review
