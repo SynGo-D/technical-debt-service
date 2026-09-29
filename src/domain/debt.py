@@ -11,10 +11,10 @@ class DebtCalculationRequest(BaseModel):
 
     commit_sha: str
 
-    findings: list[AnalysisFinding]
-
     lines_added: int = 0
 
     lines_removed: int = 0
 
     files_changed: int = 0
+
+    findings: list[AnalysisFinding]

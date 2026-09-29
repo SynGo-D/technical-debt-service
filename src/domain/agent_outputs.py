@@ -1,6 +1,18 @@
 from pydantic import BaseModel, Field
 
 
+DEBT_TYPES = (
+    "SECURITY", "BUG", "MAINTAINABILITY", "PERFORMANCE", "RELIABILITY",
+    "DUPLICATION", "TESTABILITY", "ARCHITECTURE", "DOCUMENTATION",
+)
+
+LEVELS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+
+COMPLEXITIES = ("LOW", "MEDIUM", "HIGH")
+
+MIN_MINUTES, MAX_MINUTES = 1, 2400  # 1 minute .. 5 working days
+
+
 class ClassificationOutput(BaseModel):
 
     debt_type: str

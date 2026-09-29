@@ -12,7 +12,9 @@ class HealthCalculator:
         score = 100
 
         score -= critical * 15
+
         score -= high * 8
+
         score -= total_findings * 2
 
         if lines_changed > 0:
@@ -22,17 +24,22 @@ class HealthCalculator:
             ) / lines_changed
 
             if debt_ratio > 0.50:
+
                 score -= 10
 
             elif debt_ratio > 0.25:
+
                 score -= 5
 
         return max(
             0,
             min(100, score)
         )
-    
-    def health_status(score: int) -> str:
+
+    def status(
+        self,
+        score: int
+    ) -> str:
 
         if score >= 90:
             return "HEALTHY"
