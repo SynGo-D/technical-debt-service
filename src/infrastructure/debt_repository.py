@@ -77,6 +77,31 @@ class DebtRepository:
         async with self._sf() as s:
             await s.execute(select(1))
 
+    async def exists_for_commit(
+        self,
+        repository: str,
+        pull_request_number: int,
+        commit_sha: str,
+    ) -> bool:
+        """
+        Whether this exact commit has already been costed.
+
+        save() already replaces a run for the same repository, pull request
+        and commit, so this is not needed for correctness — it is needed
+        before the money is spent. Without it a redelivered event pays for
+        both LLM calls per finding all over again and then overwrites the
+        row with the same answer.
+        """
+        async with self._sf() as session:
+            found = await session.scalar(
+                select(DebtReview.id).where(
+                    DebtReview.repository == repository,
+                    DebtReview.pull_request_number == pull_request_number,
+                    DebtReview.commit_sha == commit_sha,
+                ).limit(1)
+            )
+        return found is not None
+
     async def save(self, result: dict) -> dict:
         """Persist a DebtService.calculate() result.
 

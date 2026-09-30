@@ -19,6 +19,7 @@ from .infrastructure.database import (
 )
 from .infrastructure.debt_repository import DebtRepository
 from .infrastructure.models import create_tables
+from .messaging.consumer import AnalysisCompletedConsumer
 from .services.aggregator import DebtAggregator
 from .services.cost_calculator import CostCalculator
 from .services.debt_service import DebtService
@@ -76,8 +77,37 @@ async def lifespan(app: FastAPI):
 
     app.state.debt_service = build_debt_service(llm)
 
+    # Consuming analysis.completed is optional: without a broker URL the
+    # service still works exactly as before, driven by the HTTP endpoint.
+    # A broker that cannot be reached is logged and skipped rather than
+    # fatal, because the button is a complete fallback for it.
+    app.state.rabbitmq_connection = None
+    if settings.rabbitmq_url:
+        try:
+            import aio_pika
+
+            app.state.rabbitmq_connection = await aio_pika.connect_robust(
+                settings.rabbitmq_url
+            )
+            channel = await app.state.rabbitmq_connection.channel()
+            await AnalysisCompletedConsumer(
+                debt_service=app.state.debt_service,
+                debt_repository=app.state.debt_repository,
+                analysis_repository=app.state.analysis_repository,
+            ).start(channel)
+        except Exception:
+            logger.exception(
+                "Could not start the analysis.completed consumer. Debt can "
+                "still be calculated through the API."
+            )
+            app.state.rabbitmq_connection = None
+    else:
+        logger.info("RABBITMQ_URL is empty: debt is calculated on request only")
+
     yield
 
+    if app.state.rabbitmq_connection is not None:
+        await app.state.rabbitmq_connection.close()
     await llm.aclose()
     await engine.dispose()
     await analysis_engine.dispose()

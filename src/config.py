@@ -48,6 +48,30 @@ class Settings(BaseSettings):
 
     frontend_origin: str = "http://localhost:3000"
 
+    # The shared platform broker — the SAME one analysis-engine publishes
+    # to, not a separate instance. Empty disables the consumer entirely,
+    # which is how the service runs with no broker at all: the HTTP
+    # "Calculate Debt" path is unaffected.
+    rabbitmq_url: str = ""
+
+    # Whether a finished analysis triggers debt calculation on its own.
+    #
+    # This is the cost switch. Each finding costs two LLM calls, so with
+    # this on, every analysed pull request spends without anyone asking —
+    # a 72-finding pull request is 144 calls. Off, the events are still
+    # consumed and acknowledged, and nothing is calculated until someone
+    # presses the button; that is the cheap way to run the pipeline while
+    # watching what it would have done.
+    auto_calculate: bool = True
+
+    # Findings above which an event is skipped rather than calculated.
+    # A pull request that touches a generated file can carry thousands of
+    # findings, and the difference between a useful number and an
+    # expensive one is not worth discovering by accident. 0 disables the
+    # ceiling. Skipped runs are logged with their count, so the ceiling
+    # can be raised deliberately.
+    auto_calculate_max_findings: int = 400
+
     port: int = 5003
 
     @field_validator("database_url", "analysis_database_url")
