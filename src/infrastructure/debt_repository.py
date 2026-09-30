@@ -245,7 +245,9 @@ class DebtRepository:
             by_type[i.debt_type]["count"] += 1
             by_type[i.debt_type]["minutes"] += i.estimated_minutes
 
-        total_minutes = sum(r.total_debt_minutes for r in latest)
+        # Debt of the most recently calculated pull request (`latest` is
+        # newest first), not a sum across PRs.
+        total_minutes = latest[0].total_debt_minutes
 
         pr_by_id = {r.id: r.pull_request_number for r in latest}
 
