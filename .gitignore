@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+# A Windows virtualenv was once committed as a directory literally named
+# ".venvScriptsactivate", from `python -m venv .venv\Scripts\activate`.
+.venvScriptsactivate/
