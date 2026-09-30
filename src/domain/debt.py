@@ -18,3 +18,10 @@ class DebtCalculationRequest(BaseModel):
     files_changed: int = 0
 
     findings: list[AnalysisFinding]
+
+    # "pull_request": only findings on lines the PR changed (debt it introduced).
+    # "repository": the diff was unavailable, so every finding was counted.
+    scope: str = "pull_request"
+
+    # Findings left out because they sit on lines the PR did not change.
+    pre_existing_excluded: int = 0

@@ -8,6 +8,7 @@ from src.config import Settings
 from src.domain.agent_outputs import ClassificationOutput
 from src.domain.debt import DebtCalculationRequest
 from src.domain.finding import AnalysisFinding
+from src.infrastructure.analysis_repository import introduced_findings
 from src.services.aggregator import DebtAggregator
 from src.services.cost_calculator import CostCalculator
 from src.services.debt_service import DebtService
@@ -136,6 +137,27 @@ async def test_ratio_none_without_diff():
         repository="o/r", pull_request_number=1, commit_sha="a", findings=[finding()],
     ))
     assert out["summary"]["debt_ratio"] is None
+
+
+# ---- PR scope --------------------------------------------------------------
+
+def test_only_findings_on_changed_lines_are_charged():
+    new = finding(1, metadata={"on_changed_line": True})
+    old = finding(2, metadata={"on_changed_line": False})
+    kept, scope = introduced_findings([new, old], changes_available=True)
+    assert kept == [new] and scope == "pull_request"
+
+
+def test_all_findings_counted_when_diff_unavailable():
+    fs = [finding(1, metadata={"on_changed_line": True}), finding(2, metadata={"on_changed_line": False})]
+    kept, scope = introduced_findings(fs, changes_available=False)
+    assert kept == fs and scope == "repository"
+
+
+def test_all_findings_counted_when_untagged():
+    fs = [finding(1), finding(2)]  # older analysis-engine: no on_changed_line tag
+    kept, scope = introduced_findings(fs, changes_available=True)
+    assert kept == fs and scope == "repository"
 
 
 # ---- config ----------------------------------------------------------------
