@@ -29,6 +29,8 @@ async def _calculate_and_store(
 
     return {
         "review": saved,
+        "scope": result["scope"],
+        "pre_existing_excluded": result["pre_existing_excluded"],
         "findings_received": result["findings_received"],
         "findings_skipped": result["findings_skipped"],
     }

@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..domain.debt import DebtCalculationRequest
 from ..domain.finding import AnalysisFinding
 
+# Set by analysis-engine's diffing/change_mapper.py on every finding.
+ON_CHANGED_LINE = "on_changed_line"
+
 
 class AnalysisNotFound(Exception):
 
@@ -29,6 +32,25 @@ def _json(value) -> dict:
     if isinstance(value, (str, bytes)):
         return json.loads(value)
     return value
+
+
+def introduced_findings(
+    findings: list[AnalysisFinding],
+    changes_available: bool,
+) -> tuple[list[AnalysisFinding], str]:
+    """The findings a PR is charged for, and the scope that describes them.
+
+    analysis-engine lints the whole repository and tags each finding with
+    whether the PR changed its line. A PR's debt is only what it introduced;
+    without the diff (or the tag, from an older analysis-engine) we can't
+    tell, so every finding is counted and the scope says so.
+    """
+    tagged = any(ON_CHANGED_LINE in f.metadata for f in findings)
+
+    if changes_available and (tagged or not findings):
+        return [f for f in findings if f.metadata.get(ON_CHANGED_LINE) is True], "pull_request"
+
+    return findings, "repository"
 
 
 class AnalysisEngineRepository:
@@ -114,11 +136,15 @@ class AnalysisEngineRepository:
         changes = _json(result["pull_request_changes"])
         available = changes.get("status") == "available"
 
+        introduced, scope = introduced_findings(findings, available)
+
         return DebtCalculationRequest(
             repository=repository,
             pull_request_number=pull_request_number,
             commit_sha=result["commit_sha"],
-            findings=findings,
+            findings=introduced,
+            scope=scope,
+            pre_existing_excluded=len(findings) - len(introduced),
             lines_added=changes.get("lines_added", 0) if available else 0,
             lines_removed=changes.get("lines_removed", 0) if available else 0,
             files_changed=changes.get("files_changed", 0) if available else 0,

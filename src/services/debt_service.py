@@ -115,6 +115,8 @@ class DebtService:
                 "health_score": health_score,
                 "health_status": self.health_calculator.status(health_score),
             },
+            "scope": request.scope,
+            "pre_existing_excluded": request.pre_existing_excluded,
             "findings_received": received,
             "findings_skipped": received - len(findings),
             "issues": results,
