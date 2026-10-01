@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ..domain.debt import DebtCalculationRequest
 from ..infrastructure.analysis_repository import AnalysisNotFound
+from ..infrastructure.sonar_client import SonarError
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ async def _calculate_and_store(
 
     return {
         "review": saved,
+        "method": result["method"],
+        "unmapped_issues": result["unmapped_issues"],
         "scope": result["scope"],
         "pre_existing_excluded": result["pre_existing_excluded"],
         "findings_received": result["findings_received"],
@@ -77,6 +80,26 @@ async def calculate_for_pull_request(
         ) from None
 
     return await _calculate_and_store(request, payload)
+
+
+@router.get("/api/debt/rules/status")
+async def rule_catalog_status(request: Request):
+    """How many SonarQube rules are stored locally, and when they were last synced."""
+
+    return await request.app.state.rule_catalog.status()
+
+
+@router.post("/api/debt/rules/sync")
+async def sync_rule_catalog(request: Request):
+    """Refresh the local SonarQube rule catalog now (it also runs weekly)."""
+
+    try:
+        count = await request.app.state.catalog_sync.sync()
+
+    except SonarError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
+
+    return {"rules": count}
 
 
 @router.get("/api/debt/repositories")

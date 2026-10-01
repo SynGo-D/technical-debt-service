@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     # Highest-severity findings are kept first; the rest are reported as skipped.
     max_findings_per_run: int = 200
 
+    # SonarQube is only contacted by the rule-catalog sync (weekly, in the
+    # background) - never while a pull request is being calculated.
+    sonar_url: str = "http://localhost:9000"
+
+    sonar_token: str = ""
+
+    sonar_languages: str = "js,ts,py"
+
+    sonar_sync_interval_hours: int = 168  # one week; 0 disables the automatic sync
+
     frontend_origin: str = "http://localhost:3000"
 
     # The shared platform broker — the SAME one analysis-engine publishes

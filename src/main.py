@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .agents.classification_agent import ClassificationAgent
 from .agents.estimation_agent import EstimationAgent
 from .agents.llm_client import LLMClient
+from .agents.rule_matching_agent import RuleMatchingAgent
 from .api.debt import router as debt_router
 from .api.health import router as health_router
 from .config import settings
@@ -19,11 +21,14 @@ from .infrastructure.database import (
 )
 from .infrastructure.debt_repository import DebtRepository
 from .infrastructure.models import create_tables
+from .infrastructure.rule_catalog_repository import RuleCatalogRepository
 from .messaging.consumer import AnalysisCompletedConsumer
 from .services.aggregator import DebtAggregator
+from .services.catalog_sync import CatalogSync
 from .services.cost_calculator import CostCalculator
 from .services.debt_service import DebtService
 from .services.health_calculator import HealthCalculator
+from .services.sonar_assessor import SonarDebtAssessor
 
 
 logging.basicConfig(
@@ -34,7 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def build_debt_service(llm: LLMClient) -> DebtService:
+def build_debt_service(llm: LLMClient, catalog: RuleCatalogRepository) -> DebtService:
 
     return DebtService(
         classification_agent=ClassificationAgent(llm),
@@ -44,6 +49,7 @@ def build_debt_service(llm: LLMClient) -> DebtService:
         health_calculator=HealthCalculator(),
         concurrency=settings.llm_concurrency,
         max_findings=settings.max_findings_per_run,
+        assessor=SonarDebtAssessor(catalog, RuleMatchingAgent(llm)),
     )
 
 
@@ -75,7 +81,24 @@ async def lifespan(app: FastAPI):
 
     llm = LLMClient()
 
-    app.state.debt_service = build_debt_service(llm)
+    app.state.rule_catalog = RuleCatalogRepository(AsyncSessionLocal)
+
+    app.state.debt_service = build_debt_service(llm, app.state.rule_catalog)
+
+    app.state.catalog_sync = CatalogSync(
+        app.state.rule_catalog,
+        settings.sonar_url,
+        settings.sonar_token,
+        settings.sonar_languages,
+        settings.sonar_sync_interval_hours,
+    )
+
+    # Weekly refresh of the SonarQube rule catalog, off the request path.
+    sync_task = (
+        asyncio.create_task(app.state.catalog_sync.run_forever())
+        if settings.sonar_sync_interval_hours > 0
+        else None
+    )
 
     # Consuming analysis.completed is optional: without a broker URL the
     # service still works exactly as before, driven by the HTTP endpoint.
@@ -105,6 +128,12 @@ async def lifespan(app: FastAPI):
         logger.info("RABBITMQ_URL is empty: debt is calculated on request only")
 
     yield
+
+    # Both background workers stop before the resources they use are
+    # disposed of below: the catalog sync holds a database session, and the
+    # consumer holds a broker channel.
+    if sync_task:
+        sync_task.cancel()
 
     if app.state.rabbitmq_connection is not None:
         await app.state.rabbitmq_connection.close()
