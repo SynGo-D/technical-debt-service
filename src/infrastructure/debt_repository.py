@@ -270,7 +270,18 @@ class DebtRepository:
             by_type[i.debt_type]["count"] += 1
             by_type[i.debt_type]["minutes"] += i.estimated_minutes
 
+        # Across every pull request, which is what the rest of this summary
+        # counts: total_findings, estimated_cost, risk_counts and by_type
+        # are all sums, and a headline that quietly meant one pull request
+        # while the cost beside it meant all of them read as a $80/hour
+        # developer on a $25/hour rate.
+        #
+        # The latest pull request's own debt is reported separately below,
+        # so a card can show that figure without any other number having to
+        # lie about its scope.
         total_minutes = sum(r.total_debt_minutes for r in latest)
+
+        newest = latest[0]
 
         pr_by_id = {r.id: r.pull_request_number for r in latest}
 
@@ -282,6 +293,17 @@ class DebtRepository:
             "total_findings": sum(r.total_findings for r in latest),
             "total_debt_minutes": total_minutes,
             "total_debt_hours": round(total_minutes / 60, 2),
+            # The most recently calculated pull request on its own — what a
+            # "debt this change introduced" card wants, kept apart from the
+            # repository totals rather than substituted for them.
+            "latest_pull_request": {
+                "pull_request_number": newest.pull_request_number,
+                "total_debt_minutes": newest.total_debt_minutes,
+                "total_debt_hours": round(newest.total_debt_minutes / 60, 2),
+                "estimated_cost": float(newest.estimated_cost or 0),
+                "health_score": newest.health_score,
+                "created_at": newest.created_at.isoformat(),
+            },
             "estimated_cost": float(sum(r.estimated_cost or 0 for r in latest)),
             "average_health_score": round(
                 sum(r.health_score for r in latest) / len(latest)

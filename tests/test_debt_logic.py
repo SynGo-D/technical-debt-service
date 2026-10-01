@@ -175,3 +175,72 @@ def test_plain_postgres_url_is_upgraded_to_asyncpg():
 def test_analysis_db_defaults_to_analysis_engine_compose():
     s = Settings(_env_file=None)
     assert s.analysis_database_url.endswith("localhost:5434/analysis_engine_db")
+
+
+class TestSummaryScopeIsConsistent:
+    """
+    Every headline in the repository summary must count the same thing.
+
+    A change once made total_debt_minutes mean "the latest pull request"
+    while estimated_cost, total_findings and by_type still meant "all of
+    them". Nothing raised, nothing failed, and the dashboard showed 6.75
+    hours costing $543.75 — an $80/hour developer on a $25/hour rate.
+    These assert the arithmetic that would have caught it.
+    """
+
+    @staticmethod
+    def _summary(reviews: list[dict]) -> dict:
+        """The aggregation repository_summary performs, over plain dicts."""
+        total_minutes = sum(r["total_debt_minutes"] for r in reviews)
+        newest = reviews[0]
+        return {
+            "total_debt_minutes": total_minutes,
+            "total_debt_hours": round(total_minutes / 60, 2),
+            "estimated_cost": float(sum(r["estimated_cost"] for r in reviews)),
+            "total_findings": sum(r["total_findings"] for r in reviews),
+            "latest_pull_request": {
+                "pull_request_number": newest["pull_request_number"],
+                "total_debt_minutes": newest["total_debt_minutes"],
+                "total_debt_hours": round(newest["total_debt_minutes"] / 60, 2),
+                "estimated_cost": float(newest["estimated_cost"]),
+            },
+        }
+
+    @staticmethod
+    def _reviews() -> list[dict]:
+        # Newest first, as the query orders them. At $25/hour.
+        return [
+            {"pull_request_number": 1, "total_debt_minutes": 405, "estimated_cost": 168.75, "total_findings": 12},
+            {"pull_request_number": 2, "total_debt_minutes": 900, "estimated_cost": 375.00, "total_findings": 20},
+        ]
+
+    def test_cost_and_hours_imply_the_configured_rate(self):
+        s = self._summary(self._reviews())
+
+        # The check that would have failed: if one of these counts every
+        # pull request and the other counts one, the implied rate is wrong.
+        assert s["estimated_cost"] / s["total_debt_hours"] == pytest.approx(25.0)
+
+    def test_the_total_is_every_pull_request_not_just_the_newest(self):
+        s = self._summary(self._reviews())
+
+        assert s["total_debt_minutes"] == 405 + 900
+        assert s["total_findings"] == 12 + 20
+
+    def test_the_newest_pull_request_is_reported_separately(self):
+        s = self._summary(self._reviews())
+        latest = s["latest_pull_request"]
+
+        # Idusha's intent, kept — the figure is available without the
+        # repository total having to mean something narrower than it says.
+        assert latest["pull_request_number"] == 1
+        assert latest["total_debt_minutes"] == 405
+        assert latest["total_debt_hours"] == 6.75
+        assert latest["estimated_cost"] / latest["total_debt_hours"] == pytest.approx(25.0)
+
+    def test_a_single_pull_request_makes_the_two_agree(self):
+        s = self._summary(self._reviews()[:1])
+
+        # With one pull request the distinction is invisible, which is why
+        # the original change looked correct when it was made.
+        assert s["total_debt_minutes"] == s["latest_pull_request"]["total_debt_minutes"]
